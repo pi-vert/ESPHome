@@ -54,7 +54,8 @@ mqtt:
         payload: |-
           root["id"] = "${device_id}";
           root["type"] = "sensor";
-          root["ip"] = id(wifi_network).get_ip_addresses()[0].str();
+          char ip[network::IP_ADDRESS_BUFFER_SIZE];
+          root["ip"] = id(wifi_network).get_ip_addresses()[0].str_to(ip);
           JsonArray outputs = root["outputs"].to<JsonArray>();
           JsonObject output = outputs.add<JsonObject>();
           output["name"] = "niveau_percent";
