@@ -1,11 +1,16 @@
 substitutions:
   device_id: espwaterlevel_01
+  device_type: water_level
+  firmware_version: "1.2.0"
+  mqtt_discovery: "true"
   hauteur_vide_mm: "63.0"
   seuil_critique_mm: "5.0"
   seuil_bas_mm: "10.0"
-  mqtt_prefix: device/${device_id}
-  # Topic déjà publié par le firmware précédent : conserver les abonnements.
-  niveau_percent_topic: ${mqtt_prefix}/sensor/niveau_pourcentage/state
+  niveau_percent_topic: ${mqtt_prefix}/sensor/niveau_percent/state
+  niveau_percent_legacy_topic: ${mqtt_prefix}/sensor/niveau_pourcentage/state
+
+packages:
+  mqtt_standard: !include packages/mqtt.yaml
 
 esphome:
   name: espwaterlevel
@@ -40,28 +45,6 @@ api:
   reboot_timeout: 0s
 
 captive_portal:
-
-mqtt:
-  broker: 192.168.50.227
-  username: !secret mqtt_username
-  password: !secret mqtt_password
-  reboot_timeout: 0s
-  topic_prefix: ${mqtt_prefix}
-  on_connect:
-    # Annoncer aussi après une reconnexion, sans timer ni drapeau announce_sent.
-    - mqtt.publish_json:
-        topic: system/announce
-        payload: |-
-          root["id"] = "${device_id}";
-          root["type"] = "sensor";
-          char ip[network::IP_ADDRESS_BUFFER_SIZE];
-          root["ip"] = id(wifi_network).get_ip_addresses()[0].str_to(ip);
-          JsonArray outputs = root["outputs"].to<JsonArray>();
-          JsonObject output = outputs.add<JsonObject>();
-          output["name"] = "niveau_percent";
-          output["datatype"] = "float";
-          output["unit"] = "%";
-          output["topic"] = "${niveau_percent_topic}";
 
 globals:
   # Validité du dernier écho BRUT, avant que la médiane ignore les NaN.
@@ -107,6 +90,8 @@ sensor:
     unit_of_measurement: "mm"
     accuracy_decimals: 0
     state_topic: ${mqtt_prefix}/sensor/distance_eau_capteur/state
+    qos: 0
+    retain: true
     filters:
       - multiply: 1000.0
 
@@ -117,6 +102,8 @@ sensor:
     unit_of_measurement: "mm"
     accuracy_decimals: 0
     state_topic: ${mqtt_prefix}/sensor/niveau/state
+    qos: 0
+    retain: true
     filters:
       - lambda: |-
           static_assert(${hauteur_vide_mm} > 0.0, "La hauteur doit etre positive");
@@ -134,10 +121,15 @@ sensor:
     unit_of_measurement: "%"
     accuracy_decimals: 0
     state_topic: ${niveau_percent_topic}
+    qos: 0
+    retain: true
     filters:
       - lambda: |-
           if (!std::isfinite(x)) return NAN;
           return x * 100.0f / ${hauteur_vide_mm}f;
+    on_value:
+      then:
+        - script.execute: mqtt_percentage_legacy
 
 output:
   - platform: gpio
@@ -171,8 +163,53 @@ text_sensor:
     ip_address:
       name: "ESP IP Address"
       id: esp_ip
+      state_topic: ${mqtt_prefix}/sensor/esp_ip_address/state
+      qos: 0
+      retain: true
 
 script:
+  - id: mqtt_announce
+    then:
+      - lambda: |-
+          if (!id(mqtt_client).is_connected()) return;
+          auto describe = [](JsonObject root) {
+            mqtt_standard::announcement(root, "${device_id}", "${device_type}",
+                                        "${firmware_version}", "${mqtt_prefix}");
+            mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "distance_eau_capteur", "float", "mm", true);
+            mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "niveau", "float", "mm", true);
+            mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "niveau_percent", "float", "%", true);
+            mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "esp_ip_address", "string", nullptr, true);
+          };
+          id(mqtt_client).publish_json("${mqtt_prefix}/announce", describe, 1, true);
+          id(mqtt_client).publish_json("system/announce", describe, 1, false);
+      - script.execute: mqtt_percentage_legacy
+
+  - id: mqtt_snapshot
+    then:
+      - lambda: |-
+          if (!id(mqtt_client).is_connected()) return;
+          id(mqtt_client).publish_json("${mqtt_prefix}/state", [](JsonObject root) {
+            mqtt_standard::envelope(root, "${device_id}", "${device_type}", "${firmware_version}");
+            mqtt_standard::number(root, "distance_eau_capteur", id(distance_eau_mm).state);
+            mqtt_standard::number(root, "niveau", id(niveau_mm).state);
+            mqtt_standard::number(root, "niveau_percent", id(niveau_percent).state);
+            root["mesure_valide"] = id(mesure_valide) && std::isfinite(id(niveau_mm).state);
+          }, 0, true);
+
+  - id: mqtt_percentage_legacy
+    then:
+      - lambda: |-
+          if (!id(mqtt_client).is_connected()) return;
+          const float value = id(niveau_percent).state;
+          if (!std::isfinite(value)) {
+            id(mqtt_client).publish("${niveau_percent_legacy_topic}", "None", 4, 0, true);
+            return;
+          }
+          // Même format que le composant MQTT natif, pour l'alias historique.
+          char payload[VALUE_ACCURACY_MAX_LEN];
+          const size_t length = value_accuracy_to_buf(payload, value, 0);
+          id(mqtt_client).publish("${niveau_percent_legacy_topic}", payload, length, 0, true);
+
   - id: actualiser_led
     mode: single
     then:
