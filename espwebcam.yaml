@@ -56,8 +56,8 @@ wifi:
   reboot_timeout: 0s
 
 api:
-  services:
-    - service: camera_set_param
+  actions:
+    - action: camera_set_param
       variables:
         name: string
         value: int
