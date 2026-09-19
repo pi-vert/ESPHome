@@ -1,0 +1,3 @@
+# Versions de référence de l'environnement de développement.
+esphome==2026.9.0
+esphome-device-builder==1.14.9

@@ -1,0 +1,17 @@
+# Copier ce modèle à la racine sous mon-esp32.yaml pour l'utiliser.
+# Modèle ESP32 classique : adapter la carte pour un ESP32-C3/S3/etc.
+substitutions:
+  device_name: mon-esp32
+  friendly_name: Mon ESP32
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+packages:
+  base: !include packages/base.yaml

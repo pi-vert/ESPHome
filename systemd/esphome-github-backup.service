@@ -1,0 +1,9 @@
+[Unit]
+Description=Sauvegarde ESPHome vers GitHub
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/esphome
+ExecStart=%h/.local/share/esphome/bin/python %h/esphome/scripts/github-backup.py
+TimeoutStartSec=5min
+UMask=0077

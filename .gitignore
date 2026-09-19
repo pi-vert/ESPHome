@@ -1,8 +1,36 @@
-# Managed by ESPHome Device Builder — created because this directory
-# was not already a git repository. Edit freely; it won't be regenerated.
+# Fichiers locaux ESPHome et Device Builder
 .esphome/
 .device-builder*
 .receiver_peers.json
 .offloader_pairings.json
-.DS_Store
+
+# Identifiants et variantes locales (à tous les niveaux)
 secrets.yaml
+secrets.yml
+secrets.*.yaml
+secrets.*.yml
+*.secrets.yaml
+*.secrets.yml
+.env
+.env.*
+
+# Sauvegardes de flash et firmwares : peuvent contenir des identifiants
+/backups/
+*.bin
+*.elf
+*.uf2
+*.hex
+
+# Compilation, environnement Python et caches
+.pio/
+.platformio/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.log
+
+# Éditeurs et système
+.DS_Store
+*~
+*.swp

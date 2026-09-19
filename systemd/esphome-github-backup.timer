@@ -1,0 +1,11 @@
+[Unit]
+Description=Sauvegarde horaire ESPHome vers GitHub
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=2min
+Unit=esphome-github-backup.service
+
+[Install]
+WantedBy=timers.target

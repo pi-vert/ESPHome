@@ -1,0 +1,19 @@
+# Réglages communs ; les valeurs privées sont dans secrets.yaml à la racine.
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${device_name} secours"
+    password: !secret fallback_ap_password
+
+captive_portal:
