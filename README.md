@@ -6,23 +6,31 @@ versionnés sur GitHub. Versions de référence : **ESPHome 2026.9.0** et
 
 ## Interface web
 
-Depuis un appareil du réseau local, ouvrir **http://192.168.50.75:6052**.
-Sur cette machine, **http://localhost:6052** fonctionne également.
+Depuis un appareil du réseau local, ouvrir **https://192.168.50.75:8443**.
+L'ancienne adresse `http://192.168.50.75:6052` redirige vers HTTPS.
+
+Pour faire reconnaître HTTPS par le navigateur et flasher par USB, importer
+une fois le [certificat public ESPHome](http://192.168.50.75:6052/esphome-ca.crt)
+comme autorité de confiance. La procédure Ubuntu/Linux est dans
+**[docs/https.md](docs/https.md)**. Utiliser Chrome, Chromium ou Edge pour
+l'accès USB ; la connexion doit être reconnue sans avertissement de certificat.
 
 L'interface fonctionne en arrière-plan via le service utilisateur
-`esphome-dashboard.service`. Son démarrage automatique est activé ; le mode
+`esphome-dashboard.service`, avec Caddy dans `esphome-https.service` pour HTTPS.
+Leur démarrage automatique est activé ; le mode
 « linger » de l'utilisateur permet son démarrage même sans ouverture de session.
 
 ```bash
 systemctl --user status esphome-dashboard
+systemctl --user status esphome-https
 systemctl --user restart esphome-dashboard
 systemctl --user stop esphome-dashboard
 journalctl --user -u esphome-dashboard -f
 ```
 
-L'interface écoute sur toutes les interfaces IPv4 (`0.0.0.0`), port `6052`.
-L'adresse actuelle du PC est `192.168.50.75` ; si elle change, utiliser sa
-nouvelle adresse dans `http://ADRESSE_IP_DU_PC:6052`.
+Caddy écoute sur les ports `8443` (HTTPS) et `6052` (redirection et certificat
+public). Device Builder écoute localement sur `127.0.0.1:6054`.
+Si l'adresse du PC change, adapter `Caddyfile`, puis redémarrer `esphome-https`.
 
 ## Arborescence
 
@@ -36,8 +44,11 @@ esphome/
 │   └── base.yaml              # Wi-Fi, API, OTA et journaux partagés
 ├── docs/                      # Fiches appareils et câblage
 ├── scripts/github-backup.py   # Sauvegarde automatique GitHub
+├── scripts/install-https.sh   # Installation utilisateur de Caddy
+├── Caddyfile                  # HTTPS, redirection et proxy
 ├── systemd/
 │   ├── esphome-dashboard.service
+│   ├── esphome-https.service
 │   ├── esphome-github-backup.service
 │   └── esphome-github-backup.timer
 ├── requirements.txt           # Versions des deux outils principaux
@@ -124,6 +135,8 @@ modèle, puis activer l'interface :
 
 ```bash
 systemctl --user enable --now ~/esphome/systemd/esphome-dashboard.service
+bash ~/esphome/scripts/install-https.sh
+systemctl --user enable --now ~/esphome/systemd/esphome-https.service
 sudo loginctl enable-linger "$USER"
 ```
 
@@ -133,11 +146,14 @@ emplacements changent. Pour un lancement manuel au premier plan :
 
 ```bash
 systemctl --user stop esphome-dashboard
-~/.local/share/esphome/bin/esphome-device-builder ~/esphome --host 0.0.0.0 --remote-build-host 127.0.0.1
+~/.local/share/esphome/bin/esphome-device-builder ~/esphome --host 127.0.0.1 --port 6054 --remote-build-host 127.0.0.1
 ```
 
 Ctrl+C arrête ce lancement manuel ; `systemctl --user start esphome-dashboard`
 réactive le service.
+
+Le proxy HTTPS peut rester actif pendant ce lancement manuel. Pour un accès
+direct au backend depuis le serveur, utiliser `http://localhost:6054`.
 
 ### Mises à jour
 

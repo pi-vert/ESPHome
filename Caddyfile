@@ -1,0 +1,32 @@
+{
+	admin off
+	auto_https disable_redirects
+	skip_install_trust
+}
+
+# Seul le certificat PUBLIC est servi par cette route.
+(esphome_ca) {
+	handle /esphome-ca.crt {
+		root * {$HOME}/.local/share/esphome-https/caddy/pki/authorities/local
+		rewrite * /root.crt
+		header Content-Type application/x-x509-ca-cert
+		header Content-Disposition "attachment; filename=ESPHome-CA.crt"
+		file_server
+	}
+}
+
+https://192.168.50.75:8443, https://localhost:8443 {
+	tls internal
+	import esphome_ca
+	handle {
+		reverse_proxy 127.0.0.1:6054
+	}
+}
+
+# L'ancienne adresse permet de télécharger le certificat avant son import.
+http://:6052 {
+	import esphome_ca
+	handle {
+		redir https://192.168.50.75:8443{uri} permanent
+	}
+}

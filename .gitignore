@@ -14,6 +14,13 @@ secrets.*.yml
 .env
 .env.*
 
+# Clés et magasins de certificats privés (Caddy les conserve hors du dépôt)
+*.key
+*.pem
+*.p12
+*.pfx
+/certs/
+
 # Sauvegardes de flash et firmwares : peuvent contenir des identifiants
 /backups/
 *.bin

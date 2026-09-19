@@ -5,7 +5,7 @@ Description=ESPHome Device Builder - interface web
 Type=simple
 WorkingDirectory=%h/esphome
 Environment="PATH=%h/.local/share/esphome/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=%h/.local/share/esphome/bin/esphome-device-builder %h/esphome --host 0.0.0.0 --port 6052 --remote-build-host 127.0.0.1
+ExecStart=%h/.local/share/esphome/bin/esphome-device-builder %h/esphome --host 127.0.0.1 --port 6054 --remote-build-host 127.0.0.1
 Restart=on-failure
 RestartSec=5
 UMask=0077

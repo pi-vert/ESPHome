@@ -64,7 +64,8 @@ def private_path(path):
         or any(part in {".esphome", ".venv", ".pio"} for part in path.parts)
         or name.startswith((".device-builder", ".env"))
         or name in {".receiver_peers.json", ".offloader_pairings.json"}
-        or path.suffix in {".bin", ".elf", ".uf2", ".hex", ".bundle"}
+        or path.suffix in {".bin", ".elf", ".uf2", ".hex", ".bundle", ".key", ".pem", ".p12", ".pfx"}
+        or "certs" in path.parts
         or (
             path.suffix in {".yaml", ".yml"}
             and (name.startswith("secrets.") or ".secrets." in name)
@@ -91,7 +92,7 @@ def source_file(path):
         return False
     if len(path.parts) == 1:
         return (
-            path.name in {".gitignore", "requirements.txt"}
+            path.name in {".gitignore", "requirements.txt", "Caddyfile"}
             or path.suffix in {".md", ".yaml", ".yml"}
             or path.name.endswith((".yaml.example", ".yml.example"))
         )

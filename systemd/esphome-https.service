@@ -1,0 +1,17 @@
+[Unit]
+Description=Acces HTTPS ESPHome avec Caddy
+Wants=esphome-dashboard.service
+After=esphome-dashboard.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/esphome
+Environment="XDG_DATA_HOME=%h/.local/share/esphome-https"
+Environment="XDG_CONFIG_HOME=%h/.config/esphome-https"
+ExecStart=%h/.local/share/esphome-caddy/usr/bin/caddy run --config %h/esphome/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -15,7 +15,7 @@ historique avec les sources modifiées ou ajoutées, puis envoie la branche
 `master` vers GitHub.
 
 Les sources prises en compte sont les YAML, modèles `.yaml.example`, Markdown,
-`.gitignore` et `requirements.txt` à la racine, ainsi que les fichiers texte
+`.gitignore`, `requirements.txt` et `Caddyfile` à la racine, ainsi que les fichiers texte
 usuels dans `packages/`, `docs/`, `systemd/` et `scripts/`. Les suppressions
 de fichiers suivis sont également enregistrées. Les commits automatiques
 utilisent l'identité `ESPHome Backup <esphome-backup@localhost>` sans modifier
@@ -100,3 +100,5 @@ les anciennes valeurs en clair ; la conserver avec les sauvegardes privées.
 
 GitHub sauvegarde les sources. Pour une restauration complète, conserver
 séparément `secrets.yaml` et le contenu de `backups/`.
+Conserver également une sauvegarde privée de `~/.local/share/esphome-https/caddy/`
+pour préserver l'autorité de certification HTTPS lors d'une restauration.
