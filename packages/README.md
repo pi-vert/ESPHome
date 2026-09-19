@@ -23,5 +23,5 @@ heartbeat et publication du résumé. Il inclut `includes/mqtt_standard.h`.
 
 Le fichier appareil fournit les substitutions `device_id`, `device_type`,
 `firmware_version` et les scripts `mqtt_announce` / `mqtt_snapshot`.
-Les capteurs définissent leurs topics explicitement. `espgesture.yaml` et
-`espwaterlevel.yaml` sont les implémentations de référence.
+Les capteurs définissent leurs topics explicitement. `espgesture.yaml`,
+`espwaterlevel.yaml` et `espwebcam.yaml` sont les implémentations de référence.

@@ -5,7 +5,7 @@ Version du contrat : **1**, déclarée par `schema_version: 1` dans les JSON.
 Les versions de firmware sont indépendantes (`firmware_version`).
 
 Implémentation commune : `packages/mqtt.yaml` et `includes/mqtt_standard.h`.
-Appareils de référence : `espgesture` et `espwaterlevel_01`.
+Appareils de référence : `espgesture`, `espwaterlevel_01` et `espwebcam_01`.
 
 ## 1. Identifiants et topics
 
@@ -207,6 +207,30 @@ de la sortie et avec l'abonnement Node-RED existant.
 L'ancien `device/espwaterlevel_01/sensor/niveau_pourcentage/state` reste publié
 comme **alias retained**, y compris pour une mesure invalide (`None`).
 Les topics de distance, niveau et adresse IP restent identiques.
+
+### ESPWebCam
+
+- Capteur : `wifi` (int, dBm).
+- États binaires : `status`, `camera_ready`. Ce dernier indique l'initialisation
+  du pilote, pas une mesure de fraîcheur des images.
+- Actionneurs : `light`, `led`, `camera_config` (JSON), `restart` (commande ON).
+- Résumé : `wifi`, `camera_ready`, `light`, `led`, `camera_config`.
+- Lumières : JSON natif ESPHome, par exemple `{"state":"ON","brightness":128}`
+  pour le flash ; échelle de luminosité 0–255.
+- Réglage caméra : `{"name":"contrast","value":1}` ; exactement les champs
+  `name` et `value`, avec `contrast`, `brightness` ou `saturation` et un entier
+  entre −2 et +2. Les trois paramètres courants sont publiés sur l'état JSON.
+
+Une annonce peut ajouter une liste **`services`** pour les fonctions accessibles
+par un autre protocole. Chaque entrée contient `name`, `protocol`, `url` et
+`content_type`. Pour ESPWebCam : `stream` en MJPEG sur HTTP 8080 et `snapshot`
+en JPEG sur HTTP 8081. Ces services ne sont pas des sorties MQTT routables et
+les images ne sont pas insérées dans les messages MQTT.
+
+Les noms d'entités et l'action API de réglage de la caméra sont conservés.
+Les anciens topics automatiques `espwebcam/...` sont remplacés par les topics
+explicites `device/espwebcam_01/...`. Voir [espwebcam.md](espwebcam.md) pour
+les commandes et les paramètres matériels.
 
 Les aliases ne doivent pas servir de modèle aux nouveaux appareils. Leur retrait
 nécessite une migration explicite des consommateurs. Aucun effacement automatique

@@ -99,8 +99,9 @@ mots de passe écrits directement dans un fichier d'appareil.
 ## Vérifier, compiler et flasher
 
 Les particularités des appareils sont décrites dans
-[docs/espgesture.md](docs/espgesture.md) et
-[docs/espwaterlevel.md](docs/espwaterlevel.md).
+[docs/espgesture.md](docs/espgesture.md),
+[docs/espwaterlevel.md](docs/espwaterlevel.md) et
+[docs/espwebcam.md](docs/espwebcam.md).
 
 Sur cette machine, la commande `esphome` est disponible dans `~/.local/bin` :
 
