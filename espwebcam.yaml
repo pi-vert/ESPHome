@@ -1,50 +1,41 @@
+# ESP32-CAM, dédié caméra ; contrat : docs/MQTT_STANDARD.md.
 substitutions:
-  name: espwebcam
-  friendly_name: ESPWebCAM
+  device_id: espwebcam_01
+  device_type: camera
+  firmware_version: "1.1.0"
+  camera_resolution: 640x480
+  camera_jpeg_quality: "12"
+  camera_max_fps: 0.5fps
+  # Un léger rafraîchissement évite de conserver indéfiniment une image en tampon.
+  camera_idle_fps: 0.2fps
 
 packages:
-  esphome.bluetooth-proxy: "github://esphome/bluetooth-proxies/esp32-generic/esp32-generic.yaml@main"
+  mqtt_standard: !include packages/mqtt.yaml
 
 esphome:
   name: espwebcam
   friendly_name: ESPWebCam
-  min_version: 2024.11.0
+  min_version: 2026.9.0
   name_add_mac_suffix: false
   project:
     name: meshwork.camera
-    version: "1.0"
-
-  on_boot:
-    priority: -100
-    then:
-      - light.turn_off: esp_cam_light
-      - light.turn_off: esp_cam_led
-      - mqtt.publish:
-          topic: system/announce
-          payload: !lambda |-
-            return "{\"device_id\":\"espwebcam_01\","
-                   "\"type\":\"camera\","
-                   "\"capabilities\":[\"stream\",\"snapshot\",\"light\",\"status\"],"
-                   "\"version\":\"1.0\"}";
+    version: ${firmware_version}
+  includes:
+    - includes/camera_controls.h
 
 esp32:
   board: esp32cam
+  variant: esp32
   framework:
     type: esp-idf
-    version: recommended
-    sdkconfig_options:
-      CONFIG_LWIP_MAX_SOCKETS: "16"
-      CONFIG_HTTPD_MAX_OPEN_SOCKETS: "7"
-      CONFIG_HTTPD_ENABLE_SO_LINGER: "y"
-      CONFIG_LWIP_TCP_MSL: "1000"
-      CONFIG_LWIP_TCP_FIN_WAIT_TIMEOUT: "2000"
+    # ESPHome dimensionne les sockets pour MQTT, API et les serveurs HTTP.
 
 psram:
   mode: quad
   speed: 80MHz
 
 logger:
-  level: WARN
+  level: INFO
   baud_rate: 0
 
 wifi:
@@ -54,76 +45,78 @@ wifi:
   power_save_mode: none
   output_power: 17dB
   reboot_timeout: 0s
+  ap:
+    ssid: ESPWebCam Fallback Hotspot
+    password: !secret espwebcam_fallback_ap_password
+
+captive_portal:
+
+ota:
+  - platform: esphome
 
 api:
   actions:
+    # Action existante conservée ; même validation que l'entrée MQTT.
     - action: camera_set_param
       variables:
         name: string
         value: int
       then:
-        - lambda: |-
-            bool ok = false;
-            auto cam = id(espcam);
-
-            if ((name == "contrast") && (value >= -2) && (value <= 2)) { cam->set_contrast(value); ok = true; }
-            else if ((name == "brightness") && (value >= -2) && (value <= 2)) { cam->set_brightness(value); ok = true; }
-            else if ((name == "saturation") && (value >= -2) && (value <= 2)) { cam->set_saturation(value); ok = true; }
-
-            if (ok) cam->update_camera_parameters();
-            else ESP_LOGW("meshwork", "Param out of range");
+        - script.execute:
+            id: apply_camera_parameter
+            parameter: !lambda return name;
+            value: !lambda return value;
 
 mqtt:
-  id: mqtt_client
-  broker: 192.168.50.227
-  username: !secret mqtt_username
-  password: !secret mqtt_password
-  discovery: false
-  keepalive: 30s
-  birth_message:
-    topic: device/espwebcam_01/status
-    payload: online
-  will_message:
-    topic: device/espwebcam_01/status
-    payload: offline
+  on_json_message:
+    - topic: ${mqtt_prefix}/actuator/camera_config/set
+      qos: 0
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return x.size() == 2 && x["name"].is<const char *>() && x["value"].is<int>();
+            then:
+              - script.execute:
+                  id: apply_camera_parameter
+                  parameter: !lambda return x["name"].as<std::string>();
+                  value: !lambda return x["value"].as<int>();
+            else:
+              - logger.log:
+                  level: WARN
+                  format: "camera_config attend un objet avec name (texte) et value (entier)"
 
-ota:
-  - platform: esphome
-
-# ---------------------------
-# CAMERA SERVER
-# ---------------------------
-
-esp32_camera_web_server:
-  - port: 8080
-    mode: stream
-  - port: 8081
-    mode: snapshot
+i2c:
+  id: camera_i2c
+  sda: GPIO26
+  scl: GPIO27
+  frequency: 100kHz
+  scan: false
 
 esp32_camera:
   id: espcam
   name: espwebcam_01_camera
-
   external_clock:
     pin: GPIO0
     frequency: 10MHz
-  i2c_pins:
-    sda: GPIO26
-    scl: GPIO27
+  i2c_id: camera_i2c
   data_pins: [GPIO5, GPIO18, GPIO19, GPIO21, GPIO36, GPIO39, GPIO34, GPIO35]
   vsync_pin: GPIO25
   href_pin: GPIO23
   pixel_clock_pin: GPIO22
   power_down_pin: GPIO32
-
-  resolution: 640x480
-  jpeg_quality: 12
-  max_framerate: 0.5fps
-  idle_framerate: 0.2fps
-
+  resolution: ${camera_resolution}
+  pixel_format: JPEG
+  jpeg_quality: ${camera_jpeg_quality}
+  max_framerate: ${camera_max_fps}
+  idle_framerate: ${camera_idle_fps}
+  frame_buffer_count: 1
+  frame_buffer_location: PSRAM
   vertical_flip: false
   horizontal_mirror: false
-
+  contrast: 0
+  brightness: 0
+  saturation: 0
   aec_mode: auto
   aec2: false
   ae_level: 0
@@ -133,16 +126,18 @@ esp32_camera:
   agc_value: 0
   wb_mode: auto
 
-# ---------------------------
-# OUTPUTS
-# ---------------------------
+esp32_camera_web_server:
+  - port: 8080
+    mode: stream
+  - port: 8081
+    mode: snapshot
 
 output:
   - platform: ledc
+    # Le timer 0 est utilisé par l'horloge de la caméra : garder le canal 2.
     channel: 2
     pin: GPIO4
     id: esp_cam_led_pwm
-
   - platform: gpio
     pin:
       number: GPIO33
@@ -155,32 +150,144 @@ light:
     name: espwebcam_01_light
     output: esp_cam_led_pwm
     restore_mode: ALWAYS_OFF
-
+    default_transition_length: 0s
+    state_topic: ${mqtt_prefix}/actuator/light/state
+    command_topic: ${mqtt_prefix}/actuator/light/set
+    qos: 0
+    retain: true
   - platform: binary
     id: esp_cam_led
     name: espwebcam_01_led
     output: esp_cam_led_gpio
     restore_mode: ALWAYS_OFF
+    state_topic: ${mqtt_prefix}/actuator/led/state
+    command_topic: ${mqtt_prefix}/actuator/led/set
+    qos: 0
+    retain: true
 
 switch:
   - platform: restart
     id: restart_switch
     name: espwebcam_01_restart
+    state_topic: ${mqtt_prefix}/actuator/restart/state
+    command_topic: ${mqtt_prefix}/actuator/restart/set
+    qos: 0
+    retain: false
 
 binary_sensor:
   - platform: status
     id: status_sensor
     name: espwebcam_01_status
+    state_topic: ${mqtt_prefix}/binary_sensor/status/state
+    qos: 0
+    retain: true
+  - platform: template
+    id: camera_ready
+    name: espwebcam_01_camera_ready
+    # Signale l'initialisation du pilote, pas la fraîcheur de chaque image.
+    lambda: return !id(espcam).is_failed() && esp_camera_sensor_get() != nullptr;
+    state_topic: ${mqtt_prefix}/binary_sensor/camera_ready/state
+    qos: 0
+    retain: true
 
 sensor:
   - platform: wifi_signal
     id: wifi_signal_sensor
     name: espwebcam_01_wifi
     update_interval: 60s
+    accuracy_decimals: 0
+    state_topic: ${mqtt_prefix}/sensor/wifi/state
+    qos: 0
+    retain: true
 
-interval:
-  - interval: 60s
+script:
+  - id: mqtt_announce
     then:
-      - mqtt.publish:
-          topic: device/espwebcam_01/heartbeat
-          payload: "alive"
+      - lambda: |-
+          if (!id(mqtt_client).is_connected()) return;
+          auto describe = [](JsonObject root) {
+            mqtt_standard::announcement(root, "${device_id}", "${device_type}",
+                                        "${firmware_version}", "${mqtt_prefix}");
+            mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "wifi", "int", "dBm", true);
+            for (const char *name : {"status", "camera_ready"}) {
+              mqtt_standard::output(root, "${mqtt_prefix}", "binary_sensor", name, "bool", nullptr, true);
+            }
+            for (const char *name : {"light", "led", "camera_config"}) {
+              mqtt_standard::output(root, "${mqtt_prefix}", "actuator", name, "json", nullptr, true);
+              mqtt_standard::input(root, "${mqtt_prefix}", name, "json");
+            }
+            mqtt_standard::output(root, "${mqtt_prefix}", "actuator", "restart", "bool", nullptr, false);
+            auto restart = mqtt_standard::input(root, "${mqtt_prefix}", "restart", "string");
+            restart["values"].to<JsonArray>().add("ON");
+            // Les images restent sur HTTP ; seuls leurs points d'accès sont annoncés.
+            const std::string base = std::string("http://") + root["ip"].as<const char *>();
+            auto services = root["services"].to<JsonArray>();
+            auto stream = services.add<JsonObject>();
+            stream["name"] = "stream";
+            stream["protocol"] = "http";
+            stream["url"] = base + ":8080/";
+            stream["content_type"] = "multipart/x-mixed-replace";
+            auto snapshot = services.add<JsonObject>();
+            snapshot["name"] = "snapshot";
+            snapshot["protocol"] = "http";
+            snapshot["url"] = base + ":8081/";
+            snapshot["content_type"] = "image/jpeg";
+          };
+          id(mqtt_client).publish_json("${mqtt_prefix}/announce", describe, 1, true);
+          id(mqtt_client).publish_json("system/announce", describe, 1, false);
+      - script.execute: mqtt_camera_config
+
+  - id: mqtt_snapshot
+    then:
+      - lambda: |-
+          if (!id(mqtt_client).is_connected()) return;
+          id(mqtt_client).publish_json("${mqtt_prefix}/state", [](JsonObject root) {
+            mqtt_standard::envelope(root, "${device_id}", "${device_type}", "${firmware_version}");
+            mqtt_standard::number(root, "wifi", id(wifi_signal_sensor).state);
+            auto *sensor = esp_camera_sensor_get();
+            const bool ready = !id(espcam).is_failed() && sensor != nullptr;
+            root["camera_ready"] = ready;
+            light::LightJSONSchema::dump_json(*id(esp_cam_light), root["light"].to<JsonObject>());
+            light::LightJSONSchema::dump_json(*id(esp_cam_led), root["led"].to<JsonObject>());
+            auto config = root["camera_config"].to<JsonObject>();
+            if (ready) {
+              config["contrast"] = sensor->status.contrast;
+              config["brightness"] = sensor->status.brightness;
+              config["saturation"] = sensor->status.saturation;
+            } else {
+              config["contrast"] = nullptr;
+              config["brightness"] = nullptr;
+              config["saturation"] = nullptr;
+            }
+          }, 0, true);
+
+  - id: mqtt_camera_config
+    then:
+      - lambda: |-
+          if (!id(mqtt_client).is_connected()) return;
+          id(mqtt_client).publish_json("${mqtt_prefix}/actuator/camera_config/state", [](JsonObject root) {
+            auto *sensor = esp_camera_sensor_get();
+            if (!id(espcam).is_failed() && sensor != nullptr) {
+              root["contrast"] = sensor->status.contrast;
+              root["brightness"] = sensor->status.brightness;
+              root["saturation"] = sensor->status.saturation;
+            } else {
+              root["contrast"] = nullptr;
+              root["brightness"] = nullptr;
+              root["saturation"] = nullptr;
+            }
+          }, 0, true);
+
+  - id: apply_camera_parameter
+    parameters:
+      parameter: string
+      value: int
+    then:
+      - lambda: |-
+          if (esp_camera_sensor_get() == nullptr ||
+              !camera_controls::apply(id(espcam), parameter, value)) {
+            ESP_LOGW("camera_control", "Parametre refuse : camera indisponible, nom inconnu ou valeur hors [-2, 2]");
+            return;
+          }
+          id(mqtt_camera_config).execute();
+          id(mqtt_snapshot).execute();
