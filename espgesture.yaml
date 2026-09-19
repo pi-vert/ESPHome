@@ -1,9 +1,19 @@
 # Board: ESP32-C3 Super Mini (Generic)
 # Definition: definitions/boards/esp32-c3-supermini/manifest.yaml
 
+substitutions:
+  device_id: espgesture
+  device_type: gesture
+  version: "1.1"
+  sensor_interval: 1s
+  debug_interval: 2s
+  gesture_window: 250ms
+  
 esphome:
   name: espgesture
   friendly_name: ESPGesture
+  min_version: 2024.6.0
+  name_add_mac_suffix: false
 
 esp32:
   variant: esp32c3
@@ -12,7 +22,8 @@ esp32:
     type: esp-idf
 
 logger:
-
+  level: DEBUG
+  
 api:
   encryption:
     key: !secret espgesture_api_encryption_key
@@ -27,4 +38,490 @@ wifi:
     ssid: ESPGesture Fallback Hotspot
     password: !secret espgesture_fallback_ap_password
 
-captive_portal:
+  reboot_timeout: 0s
+
+  on_connect:
+    then:
+      - mqtt.publish_json:
+          topic: system/announce
+          payload: |-
+            JsonObject dev = root["${device_id}"].to<JsonObject>();
+            dev["id"] = "${device_id}";
+            dev["type"] = "${device_type}";
+            dev["ip"] = id(wifi_ip).state.c_str();
+
+            JsonArray outputs = dev["outputs"].to<JsonArray>();
+
+            JsonObject o0 = outputs.add<JsonObject>();
+            o0["name"] = "clear";
+            o0["datatype"] = "int";
+            o0["topic"] = "device/${device_id}/sensor/clear/state";
+
+            JsonObject o1 = outputs.add<JsonObject>();
+            o1["name"] = "proximity";
+            o1["datatype"] = "int";
+            o1["topic"] = "device/${device_id}/sensor/proximity/state";
+
+            JsonObject o2 = outputs.add<JsonObject>();
+            o2["name"] = "red";
+            o2["datatype"] = "int";
+            o2["topic"] = "device/${device_id}/sensor/red/state";
+
+            JsonObject o3 = outputs.add<JsonObject>();
+            o3["name"] = "green";
+            o3["datatype"] = "int";
+            o3["topic"] = "device/${device_id}/sensor/green/state";
+
+            JsonObject o4 = outputs.add<JsonObject>();
+            o4["name"] = "blue";
+            o4["datatype"] = "int";
+            o4["topic"] = "device/${device_id}/sensor/blue/state";
+
+            JsonObject o5 = outputs.add<JsonObject>();
+            o5["name"] = "wifi";
+            o5["datatype"] = "int";
+            o5["topic"] = "device/${device_id}/sensor/wifi/state";
+
+            JsonObject o6 = outputs.add<JsonObject>();
+            o6["name"] = "gesture_raw";
+            o6["datatype"] = "string";
+            o6["topic"] = "device/${device_id}/gesture/raw";
+
+            JsonObject o7 = outputs.add<JsonObject>();
+            o7["name"] = "gesture_relevant";
+            o7["datatype"] = "string";
+            o7["topic"] = "device/${device_id}/gesture/relevant";
+
+            JsonObject o8 = outputs.add<JsonObject>();
+            o8["name"] = "state";
+            o8["datatype"] = "json";
+            o8["topic"] = "device/${device_id}/state";
+
+            JsonObject o9 = outputs.add<JsonObject>();
+            o9["name"] = "debug_state";
+            o9["datatype"] = "json";
+            o9["topic"] = "device/${device_id}/debug/state";
+
+            dev["inputs"].to<JsonArray>();
+
+status_led:
+  pin: GPIO8
+
+mqtt:
+  id: mqtt_client
+  broker: 192.168.50.227
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  discovery: false
+  keepalive: 30s
+  publish_nan_as_none: true
+
+  birth_message:
+    topic: device/${device_id}/status
+    payload: online
+
+  will_message:
+    topic: device/${device_id}/status
+    payload: offline
+
+globals:
+  - id: debug_mode_enabled
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: up_score
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: down_score
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: left_score
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: right_score
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: first_gesture_code
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+i2c:
+  id: bus_a
+  sda: GPIO4
+  scl: GPIO3
+  scan: false
+
+apds9960:
+  address: 0x39
+  update_interval: ${sensor_interval}
+  led_drive: 100mA
+  proximity_gain: 4x
+  ambient_light_gain: 4x
+  gesture_led_drive: 100mA
+  gesture_gain: 4x
+  gesture_wait_time: 2.8ms
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      id: wifi_ip
+      internal: true
+
+  - platform: template
+    id: relevant_gesture
+    name: ${device_id}_relevant_gesture
+    update_interval: never
+    
+sensor:
+  - platform: apds9960
+    id: clear_channel
+    type: CLEAR
+    name: ${device_id}_clear
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/sensor/clear/state
+            payload: !lambda |-
+              return str_sprintf("%.0f", x);
+
+  - platform: apds9960
+    id: proximity_sensor
+    type: PROXIMITY
+    name: ${device_id}_proximity
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/sensor/proximity/state
+            payload: !lambda |-
+              return str_sprintf("%.0f", x);
+
+  - platform: apds9960
+    id: red_sensor
+    type: RED
+    name: ${device_id}_red
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/sensor/red/state
+            payload: !lambda |-
+              return str_sprintf("%.0f", x);
+
+  - platform: apds9960
+    id: green_sensor
+    type: GREEN
+    name: ${device_id}_green
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/sensor/green/state
+            payload: !lambda |-
+              return str_sprintf("%.0f", x);
+
+  - platform: apds9960
+    id: blue_sensor
+    type: BLUE
+    name: ${device_id}_blue
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/sensor/blue/state
+            payload: !lambda |-
+              return str_sprintf("%.0f", x);
+
+  - platform: wifi_signal
+    id: wifi_signal_sensor
+    name: ${device_id}_wifi
+    update_interval: 60s
+    on_value:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/sensor/wifi/state
+            payload: !lambda |-
+              return str_sprintf("%.0f", x);
+
+binary_sensor:
+  - platform: apds9960
+    id: gesture_up
+    direction: UP
+    name: ${device_id}_gesture_up
+    on_press:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/binary_sensor/gesture_up/state
+            payload: "ON"
+        - mqtt.publish:
+            topic: device/${device_id}/gesture/raw
+            payload: "UP"
+        - if:
+            condition:
+              lambda: |-
+                return id(debug_mode_enabled);
+            then:
+              - logger.log:
+                  level: INFO
+                  format: "Raw gesture detected: UP"
+        - lambda: |-
+            if (id(first_gesture_code) == 0) id(first_gesture_code) = 1;
+            id(up_score) += 1;
+        - script.execute: resolve_gesture_window
+    on_release:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/binary_sensor/gesture_up/state
+            payload: "OFF"
+
+  - platform: apds9960
+    id: gesture_down
+    direction: DOWN
+    name: ${device_id}_gesture_down
+    on_press:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/binary_sensor/gesture_down/state
+            payload: "ON"
+        - mqtt.publish:
+            topic: device/${device_id}/gesture/raw
+            payload: "DOWN"
+        - if:
+            condition:
+              lambda: |-
+                return id(debug_mode_enabled);
+            then:
+              - logger.log:
+                  level: INFO
+                  format: "Raw gesture detected: DOWN"
+        - lambda: |-
+            if (id(first_gesture_code) == 0) id(first_gesture_code) = 2;
+            id(down_score) += 1;
+        - script.execute: resolve_gesture_window
+    on_release:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/binary_sensor/gesture_down/state
+            payload: "OFF"
+
+  - platform: apds9960
+    id: gesture_left
+    direction: LEFT
+    name: ${device_id}_gesture_left
+    on_press:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/binary_sensor/gesture_left/state
+            payload: "ON"
+        - mqtt.publish:
+            topic: device/${device_id}/gesture/raw
+            payload: "LEFT"
+        - if:
+            condition:
+              lambda: |-
+                return id(debug_mode_enabled);
+            then:
+              - logger.log:
+                  level: INFO
+                  format: "Raw gesture detected: LEFT"
+        - lambda: |-
+            if (id(first_gesture_code) == 0) id(first_gesture_code) = 3;
+            id(left_score) += 1;
+        - script.execute: resolve_gesture_window
+    on_release:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/binary_sensor/gesture_left/state
+            payload: "OFF"
+
+  - platform: apds9960
+    id: gesture_right
+    direction: RIGHT
+    name: ${device_id}_gesture_right
+    on_press:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/binary_sensor/gesture_right/state
+            payload: "ON"
+        - mqtt.publish:
+            topic: device/${device_id}/gesture/raw
+            payload: "RIGHT"
+        - if:
+            condition:
+              lambda: |-
+                return id(debug_mode_enabled);
+            then:
+              - logger.log:
+                  level: INFO
+                  format: "Raw gesture detected: RIGHT"
+        - lambda: |-
+            if (id(first_gesture_code) == 0) id(first_gesture_code) = 4;
+            id(right_score) += 1;
+        - script.execute: resolve_gesture_window
+    on_release:
+      then:
+        - mqtt.publish:
+            topic: device/${device_id}/binary_sensor/gesture_right/state
+            payload: "OFF"
+
+  - platform: status
+    id: status_sensor
+    name: ${device_id}_status
+
+script:
+  - id: resolve_gesture_window
+    mode: restart
+    then:
+      - delay: ${gesture_window}
+      - lambda: |-
+          int best = 0;
+          int winner = 0;
+          int ties = 0;
+          const char *relevant = nullptr;
+
+          if (id(up_score) > best) {
+            best = id(up_score);
+            winner = 1;
+          }
+          if (id(down_score) > best) {
+            best = id(down_score);
+            winner = 2;
+          }
+          if (id(left_score) > best) {
+            best = id(left_score);
+            winner = 3;
+          }
+          if (id(right_score) > best) {
+            best = id(right_score);
+            winner = 4;
+          }
+
+          if (best > 0) {
+            if (id(up_score) == best) ties++;
+            if (id(down_score) == best) ties++;
+            if (id(left_score) == best) ties++;
+            if (id(right_score) == best) ties++;
+          }
+
+          if (ties > 1 && id(first_gesture_code) != 0) {
+            winner = id(first_gesture_code);
+          }
+
+          if (winner == 1) relevant = "UP";
+          else if (winner == 2) relevant = "DOWN";
+          else if (winner == 3) relevant = "LEFT";
+          else if (winner == 4) relevant = "RIGHT";
+
+          if (relevant != nullptr) {
+            id(relevant_gesture).publish_state(relevant);
+            id(mqtt_client).publish("device/${device_id}/gesture/relevant", relevant);
+
+            if (id(debug_mode_enabled)) {
+              ESP_LOGI("gesture", "Relevant gesture: %s (up=%d down=%d left=%d right=%d)",
+                       relevant, id(up_score), id(down_score), id(left_score), id(right_score));
+            }
+          }
+
+          if (id(debug_mode_enabled) && best > 0) {
+            id(mqtt_client).publish_json("device/${device_id}/debug/gesture_scores", [=](JsonObject root) {
+              root["winner"] = relevant == nullptr ? "" : relevant;
+              root["up"] = id(up_score);
+              root["down"] = id(down_score);
+              root["left"] = id(left_score);
+              root["right"] = id(right_score);
+              root["best"] = best;
+              root["ties"] = ties;
+              root["first_gesture_code"] = id(first_gesture_code);
+            });
+          }
+
+          id(up_score) = 0;
+          id(down_score) = 0;
+          id(left_score) = 0;
+          id(right_score) = 0;
+          id(first_gesture_code) = 0;
+
+interval:
+  - interval: 60s
+    then:
+      - mqtt.publish:
+          topic: device/${device_id}/heartbeat
+          payload: alive
+
+  - interval: ${sensor_interval}
+    then:
+      - mqtt.publish_json:
+          topic: device/${device_id}/state
+          payload: |-
+            root["clear"] = id(clear_channel).state;
+            root["proximity"] = id(proximity_sensor).state;
+            root["red"] = id(red_sensor).state;
+            root["green"] = id(green_sensor).state;
+            root["blue"] = id(blue_sensor).state;
+            root["wifi"] = id(wifi_signal_sensor).state;
+            root["relevant_gesture"] = id(relevant_gesture).state.c_str();
+
+  - interval: ${debug_interval}
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(debug_mode_enabled);
+          then:
+            - mqtt.publish_json:
+                topic: device/${device_id}/debug/state
+                payload: |-
+                  root["clear"] = id(clear_channel).state;
+                  root["proximity"] = id(proximity_sensor).state;
+                  root["red"] = id(red_sensor).state;
+                  root["green"] = id(green_sensor).state;
+                  root["blue"] = id(blue_sensor).state;
+                  root["wifi"] = id(wifi_signal_sensor).state;
+                  root["gesture_up"] = id(gesture_up).state;
+                  root["gesture_down"] = id(gesture_down).state;
+                  root["gesture_left"] = id(gesture_left).state;
+                  root["gesture_right"] = id(gesture_right).state;
+                  root["relevant_gesture"] = id(relevant_gesture).state.c_str();
+                  root["up_score"] = id(up_score);
+                  root["down_score"] = id(down_score);
+                  root["left_score"] = id(left_score);
+                  root["right_score"] = id(right_score);
+
+switch:
+  - platform: template
+    id: debug_mode_switch
+    name: ${device_id}_debug_mode
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: |-
+          id(debug_mode_enabled) = true;
+      - logger.log:
+          level: INFO
+          format: "Debug mode enabled"
+      - mqtt.publish:
+          topic: device/${device_id}/debug/status
+          payload: enabled
+
+    turn_off_action:
+      - lambda: |-
+          id(debug_mode_enabled) = false;
+      - logger.log:
+          level: INFO
+          format: "Debug mode disabled"
+      - mqtt.publish:
+          topic: device/${device_id}/debug/status
+          payload: disabled
+
+  - platform: restart
+    id: restart_switch
+    name: ${device_id}_restart
+
+
+
