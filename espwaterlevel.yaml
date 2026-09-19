@@ -1,22 +1,31 @@
+substitutions:
+  device_id: espwaterlevel_01
+  hauteur_vide_mm: "63.0"
+  seuil_critique_mm: "5.0"
+  seuil_bas_mm: "10.0"
+  mqtt_prefix: device/${device_id}
+  # Topic déjà publié par le firmware précédent : conserver les abonnements.
+  niveau_percent_topic: ${mqtt_prefix}/sensor/niveau_pourcentage/state
+
 esphome:
   name: espwaterlevel
   friendly_name: ESPWaterLevel
   on_boot:
     priority: -10
     then:
-      # 🔥 Clignotement rapide au démarrage
-      - script.execute: led_clignote_rapide
+      - script.execute: actualiser_led
 
 esp32:
   board: esp32-s2-saola-1
   variant: esp32s2
   framework:
     type: esp-idf
-    
+
 ota:
   - platform: esphome
 
 wifi:
+  id: wifi_network
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
@@ -24,9 +33,11 @@ wifi:
     password: !secret espwaterlevel_fallback_ap_password
 
 logger:
-  level: DEBUG
+  level: INFO
 
 api:
+  # MQTT est le canal principal ; l'absence d'un client API n'est pas une panne.
+  reboot_timeout: 0s
 
 captive_portal:
 
@@ -35,24 +46,34 @@ mqtt:
   username: !secret mqtt_username
   password: !secret mqtt_password
   reboot_timeout: 0s
-  topic_prefix: device/espwaterlevel_01
+  topic_prefix: ${mqtt_prefix}
+  on_connect:
+    # Annoncer aussi après une reconnexion, sans timer ni drapeau announce_sent.
+    - mqtt.publish_json:
+        topic: system/announce
+        payload: |-
+          root["id"] = "${device_id}";
+          root["type"] = "sensor";
+          root["ip"] = id(wifi_network).get_ip_addresses()[0].str();
+          JsonArray outputs = root["outputs"].to<JsonArray>();
+          JsonObject output = outputs.add<JsonObject>();
+          output["name"] = "niveau_percent";
+          output["datatype"] = "float";
+          output["unit"] = "%";
+          output["topic"] = "${niveau_percent_topic}";
 
-# -------------------------------------------------
-# GLOBALS
-# -------------------------------------------------
 globals:
+  # Validité du dernier écho BRUT, avant que la médiane ignore les NaN.
   - id: mesure_valide
     type: bool
     restore_value: no
     initial_value: 'false'
-  - id: announce_sent
-    type: bool
+  # 0 = éteinte, 1 = lent, 2 = rapide ; 255 force l'initialisation.
+  - id: mode_led
+    type: uint8_t
     restore_value: no
-    initial_value: 'false'
+    initial_value: '255'
 
-# -------------------------------------------------
-# CAPTEUR ULTRASON (BRUT)
-# -------------------------------------------------
 sensor:
   - platform: ultrasonic
     id: distance_eau_m
@@ -61,98 +82,62 @@ sensor:
     update_interval: 5s
     timeout: 2m
     internal: true
+    on_raw_value:
+      then:
+        - lambda: |-
+            id(mesure_valide) = std::isfinite(x) && x >= 0.0f;
     filters:
       - median:
           window_size: 9
           send_every: 1
           send_first_at: 1
+      # La médiane peut encore contenir d'anciens échos valides après un timeout.
+      # Propager immédiatement l'échec courant au lieu d'afficher une valeur périmée.
+      - lambda: |-
+          if (!id(mesure_valide) || !std::isfinite(x)) return NAN;
+          return x;
 
-# -------------------------------------------------
-# DISTANCE EAU ↔ CAPTEUR (mm) → MQTT
-# -------------------------------------------------
-  - platform: template
+  # Chaîne événementielle : un écho -> distance -> niveau -> pourcentage.
+  # Aucun timer supplémentaire, aucune dépendance à une mesure vieille de 300 s.
+  - platform: copy
+    source_id: distance_eau_m
     name: "Distance eau capteur"
     id: distance_eau_mm
     unit_of_measurement: "mm"
     accuracy_decimals: 0
-    update_interval: 300s
-    lambda: |-
-      if (!id(distance_eau_m).has_state()) return NAN;
-      return id(distance_eau_m).state * 1000.0f;
+    state_topic: ${mqtt_prefix}/sensor/distance_eau_capteur/state
+    filters:
+      - multiply: 1000.0
 
-# -------------------------------------------------
-# NIVEAU D'EAU (mm) → MQTT + LOGIQUE LED
-# -------------------------------------------------
-  - platform: template
+  - platform: copy
+    source_id: distance_eau_mm
     name: "Niveau"
     id: niveau_mm
     unit_of_measurement: "mm"
     accuracy_decimals: 0
-    update_interval: 5s
-    lambda: |-
-      if (!id(distance_eau_mm).has_state()) return NAN;
-
-      const float hauteur_vide_mm = 63.0;
-      float niveau = hauteur_vide_mm - id(distance_eau_mm).state;
-
-      if (niveau < 0) niveau = 0;
-      if (niveau > hauteur_vide_mm) niveau = hauteur_vide_mm;
-
-      return niveau;
-
+    state_topic: ${mqtt_prefix}/sensor/niveau/state
+    filters:
+      - lambda: |-
+          static_assert(${hauteur_vide_mm} > 0.0, "La hauteur doit etre positive");
+          if (!std::isfinite(x)) return NAN;
+          const float hauteur = ${hauteur_vide_mm}f;
+          return std::clamp(hauteur - x, 0.0f, hauteur);
     on_value:
       then:
-        # ✅ Première mesure valide reçue
-        - if:
-            condition:
-              lambda: 'return !id(mesure_valide);'
-            then:
-              - globals.set:
-                  id: mesure_valide
-                  value: 'true'
+        - script.execute: actualiser_led
 
-        # 🛑 Stop tous les clignotements avant décision
-        - script.stop: led_clignote_rapide
-        - script.stop: led_clignote_lent
-        - light.turn_off: led
-
-        # 🔥 Niveau < 5 mm → clignotement rapide
-        - if:
-            condition:
-              lambda: 'return x < 5.0;'
-            then:
-              - script.execute: led_clignote_rapide
-
-        # 🟡 Niveau entre 5 mm et 10 mm → clignotement lent
-        - if:
-            condition:
-              lambda: 'return x >= 5.0 && x < 10.0;'
-            then:
-              - script.execute: led_clignote_lent
-
-# -------------------------------------------------
-# NIVEAU D'EAU (%) → MQTT 
-# -------------------------------------------------
-  - platform: template
+  - platform: copy
+    source_id: niveau_mm
     name: "Niveau Pourcentage"
     id: niveau_percent
     unit_of_measurement: "%"
     accuracy_decimals: 0
-    update_interval: 5s
-    lambda: |-
-      if (!id(niveau_mm).has_state()) return NAN;
+    state_topic: ${niveau_percent_topic}
+    filters:
+      - lambda: |-
+          if (!std::isfinite(x)) return NAN;
+          return x * 100.0f / ${hauteur_vide_mm}f;
 
-      const float hauteur_max_mm = 63.0;
-      float percent = (id(niveau_mm).state / hauteur_max_mm) * 100.0;
-
-      if (percent < 0) percent = 0;
-      if (percent > 100) percent = 100;
-
-      return percent;
-
-# -------------------------------------------------
-# LED
-# -------------------------------------------------
 output:
   - platform: gpio
     pin: GPIO15
@@ -162,6 +147,23 @@ light:
   - platform: binary
     id: led
     output: led_gpio
+    internal: true
+    restore_mode: ALWAYS_OFF
+    effects:
+      - strobe:
+          name: Rapide
+          colors:
+            - state: true
+              duration: 200ms
+            - state: false
+              duration: 200ms
+      - strobe:
+          name: Lent
+          colors:
+            - state: true
+              duration: 800ms
+            - state: false
+              duration: 800ms
 
 text_sensor:
   - platform: wifi_info
@@ -169,67 +171,26 @@ text_sensor:
       name: "ESP IP Address"
       id: esp_ip
 
-# -------------------------------------------------
-# SCRIPTS LED
-# -------------------------------------------------
 script:
-  - id: led_clignote_rapide
-    mode: restart
+  - id: actualiser_led
+    mode: single
     then:
-      - while:
-          condition:
-            lambda: 'return true;'
-          then:
-            - light.turn_on: led
-            - delay: 200ms
-            - light.turn_off: led
-            - delay: 200ms
-
-  - id: led_clignote_lent
-    mode: restart
-    then:
-      - while:
-          condition:
-            lambda: 'return true;'
-          then:
-            - light.turn_on: led
-            - delay: 800ms
-            - light.turn_off: led
-            - delay: 800ms
-
-interval:
-  - interval: 5s
-    then:
-      - if:
-          condition:
-            and:
-              - mqtt.connected:
-              - lambda: 'return !id(announce_sent);'
-          then:
-            - mqtt.publish:
-                topic: system/announce
-                payload: !lambda |-
-                  char buffer[512];
-                  sprintf(buffer,
-                    "{"
-                    "\"id\":\"espwaterlevel_01\","
-                    "\"type\":\"sensor\","
-                    "\"ip\":\"%s\","
-                    "\"outputs\":["
-                      "{"
-                        "\"name\":\"niveau_percent\","
-                        "\"datatype\":\"float\","
-                        "\"unit\":\"%%\","
-                        "\"topic\":\"device/espwaterlevel_01/sensor/niveau_percent/state\""
-                      "}"
-                    "]"
-                    "}",
-                    id(esp_ip).state.c_str()
-                  );
-                  return std::string(buffer);
-
-            - globals.set:
-                id: announce_sent
-                value: 'true'
-
-
+      - lambda: |-
+          static_assert(${seuil_critique_mm} >= 0.0 &&
+                        ${seuil_critique_mm} < ${seuil_bas_mm} &&
+                        ${seuil_bas_mm} <= ${hauteur_vide_mm},
+                        "Seuils de niveau incoherents");
+          const float niveau = id(niveau_mm).state;
+          uint8_t nouveau_mode = 2;  // Démarrage ou défaut de mesure : alerte rapide.
+          if (id(mesure_valide) && std::isfinite(niveau)) {
+            nouveau_mode = niveau < ${seuil_critique_mm}f ? 2
+                         : niveau < ${seuil_bas_mm}f ? 1 : 0;
+          }
+          // Ne pas interrompre la phase du clignotement à chaque mesure.
+          if (nouveau_mode == id(mode_led)) return;
+          id(mode_led) = nouveau_mode;
+          auto call = id(led).make_call();
+          call.set_state(nouveau_mode != 0);
+          call.set_effect(nouveau_mode == 2 ? "Rapide"
+                          : nouveau_mode == 1 ? "Lent" : "None");
+          call.perform();
