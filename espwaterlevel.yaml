@@ -1,19 +1,18 @@
-# Board: Adafruit ESP32-S2 Feather Development Board
-# Definition: definitions/boards/featheresp32-s2/manifest.yaml
-
 esphome:
   name: espwaterlevel
   friendly_name: ESPWaterLevel
+  on_boot:
+    priority: -10
+    then:
+      # 🔥 Clignotement rapide au démarrage
+      - script.execute: led_clignote_rapide
 
 esp32:
+  board: esp32-s2-saola-1
   variant: esp32s2
-
-logger:
-
-api:
-  encryption:
-    key: !secret espwaterlevel_api_encryption_key
-
+  framework:
+    type: esp-idf
+    
 ota:
   - platform: esphome
 
@@ -24,4 +23,213 @@ wifi:
     ssid: ESPWaterLevel Fallback Hotspot
     password: !secret espwaterlevel_fallback_ap_password
 
+logger:
+  level: DEBUG
+
+api:
+
 captive_portal:
+
+mqtt:
+  broker: 192.168.50.227
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  reboot_timeout: 0s
+  topic_prefix: device/espwaterlevel_01
+
+# -------------------------------------------------
+# GLOBALS
+# -------------------------------------------------
+globals:
+  - id: mesure_valide
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: announce_sent
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+# -------------------------------------------------
+# CAPTEUR ULTRASON (BRUT)
+# -------------------------------------------------
+sensor:
+  - platform: ultrasonic
+    id: distance_eau_m
+    trigger_pin: GPIO18
+    echo_pin: GPIO16
+    update_interval: 5s
+    timeout: 2m
+    internal: true
+    filters:
+      - median:
+          window_size: 9
+          send_every: 1
+          send_first_at: 1
+
+# -------------------------------------------------
+# DISTANCE EAU ↔ CAPTEUR (mm) → MQTT
+# -------------------------------------------------
+  - platform: template
+    name: "Distance eau capteur"
+    id: distance_eau_mm
+    unit_of_measurement: "mm"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      if (!id(distance_eau_m).has_state()) return NAN;
+      return id(distance_eau_m).state * 1000.0f;
+
+# -------------------------------------------------
+# NIVEAU D'EAU (mm) → MQTT + LOGIQUE LED
+# -------------------------------------------------
+  - platform: template
+    name: "Niveau"
+    id: niveau_mm
+    unit_of_measurement: "mm"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      if (!id(distance_eau_mm).has_state()) return NAN;
+
+      const float hauteur_vide_mm = 63.0;
+      float niveau = hauteur_vide_mm - id(distance_eau_mm).state;
+
+      if (niveau < 0) niveau = 0;
+      if (niveau > hauteur_vide_mm) niveau = hauteur_vide_mm;
+
+      return niveau;
+
+    on_value:
+      then:
+        # ✅ Première mesure valide reçue
+        - if:
+            condition:
+              lambda: 'return !id(mesure_valide);'
+            then:
+              - globals.set:
+                  id: mesure_valide
+                  value: 'true'
+
+        # 🛑 Stop tous les clignotements avant décision
+        - script.stop: led_clignote_rapide
+        - script.stop: led_clignote_lent
+        - light.turn_off: led
+
+        # 🔥 Niveau < 5 mm → clignotement rapide
+        - if:
+            condition:
+              lambda: 'return x < 5.0;'
+            then:
+              - script.execute: led_clignote_rapide
+
+        # 🟡 Niveau entre 5 mm et 10 mm → clignotement lent
+        - if:
+            condition:
+              lambda: 'return x >= 5.0 && x < 10.0;'
+            then:
+              - script.execute: led_clignote_lent
+
+# -------------------------------------------------
+# NIVEAU D'EAU (%) → MQTT 
+# -------------------------------------------------
+  - platform: template
+    name: "Niveau Pourcentage"
+    id: niveau_percent
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      if (!id(niveau_mm).has_state()) return NAN;
+
+      const float hauteur_max_mm = 63.0;
+      float percent = (id(niveau_mm).state / hauteur_max_mm) * 100.0;
+
+      if (percent < 0) percent = 0;
+      if (percent > 100) percent = 100;
+
+      return percent;
+
+# -------------------------------------------------
+# LED
+# -------------------------------------------------
+output:
+  - platform: gpio
+    pin: GPIO15
+    id: led_gpio
+
+light:
+  - platform: binary
+    id: led
+    output: led_gpio
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "ESP IP Address"
+      id: esp_ip
+
+# -------------------------------------------------
+# SCRIPTS LED
+# -------------------------------------------------
+script:
+  - id: led_clignote_rapide
+    mode: restart
+    then:
+      - while:
+          condition:
+            lambda: 'return true;'
+          then:
+            - light.turn_on: led
+            - delay: 200ms
+            - light.turn_off: led
+            - delay: 200ms
+
+  - id: led_clignote_lent
+    mode: restart
+    then:
+      - while:
+          condition:
+            lambda: 'return true;'
+          then:
+            - light.turn_on: led
+            - delay: 800ms
+            - light.turn_off: led
+            - delay: 800ms
+
+interval:
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            and:
+              - mqtt.connected:
+              - lambda: 'return !id(announce_sent);'
+          then:
+            - mqtt.publish:
+                topic: system/announce
+                payload: !lambda |-
+                  char buffer[512];
+                  sprintf(buffer,
+                    "{"
+                    "\"id\":\"espwaterlevel_01\","
+                    "\"type\":\"sensor\","
+                    "\"ip\":\"%s\","
+                    "\"outputs\":["
+                      "{"
+                        "\"name\":\"niveau_percent\","
+                        "\"datatype\":\"float\","
+                        "\"unit\":\"%%\","
+                        "\"topic\":\"device/espwaterlevel_01/sensor/niveau_percent/state\""
+                      "}"
+                    "]"
+                    "}",
+                    id(esp_ip).state.c_str()
+                  );
+                  return std::string(buffer);
+
+            - globals.set:
+                id: announce_sent
+                value: 'true'
+
+
