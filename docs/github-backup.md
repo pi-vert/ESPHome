@@ -16,7 +16,8 @@ historique avec les sources modifiées ou ajoutées, puis envoie la branche
 
 Les sources prises en compte sont les YAML, modèles `.yaml.example`, Markdown,
 `.gitignore`, `requirements.txt` et `Caddyfile` à la racine, ainsi que les fichiers texte
-usuels dans `packages/`, `docs/`, `systemd/` et `scripts/`. Les suppressions
+usuels dans `packages/`, `docs/`, `systemd/`, `scripts/`, `includes/` et `tests/`,
+y compris les sources C++ et leurs tests. Les suppressions
 de fichiers suivis sont également enregistrées. Les commits automatiques
 utilisent l'identité `ESPHome Backup <esphome-backup@localhost>` sans modifier
 la configuration Git personnelle.
@@ -102,3 +103,21 @@ GitHub sauvegarde les sources. Pour une restauration complète, conserver
 séparément `secrets.yaml` et le contenu de `backups/`.
 Conserver également une sauvegarde privée de `~/.local/share/esphome-https/caddy/`
 pour préserver l'autorité de certification HTTPS lors d'une restauration.
+
+### Nettoyage des ajouts du 19 septembre 2026
+
+Les identifiants présents dans les nouvelles configurations `espmatrix.yaml`,
+`espwebcam.yaml` et dans les anciennes versions d'`espwaterlevel.yaml` ont été
+remplacés par des références `!secret`. Les valeurs actives sont conservées,
+ainsi que les anciennes clés API nécessaires pour relire l'historique.
+
+Seuls les commits locaux postérieurs à `884dbefd4ad1` ont été nettoyés.
+L'historique déjà publié sur GitHub est conservé, permettant un envoi normal.
+Une copie privée préalable est conservée dans `backups/git-cleanup-20260919/` :
+
+- `history-before-cleanup.bundle` : historique Git avant nettoyage ;
+- `files-before-cleanup.tar.gz` : fichiers locaux, y compris les secrets et
+  les modifications encore non enregistrées, hors caches de compilation.
+
+Ces archives contiennent des identifiants ; elles restent locales, exclues
+de Git et accessibles uniquement à l'utilisateur du PC.

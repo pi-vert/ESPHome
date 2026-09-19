@@ -96,8 +96,8 @@ def source_file(path):
             or path.suffix in {".md", ".yaml", ".yml"}
             or path.name.endswith((".yaml.example", ".yml.example"))
         )
-    return path.parts[0] in {"packages", "docs", "systemd", "scripts"} and path.suffix in {
-        ".yaml", ".yml", ".md", ".service", ".timer", ".py", ".sh", ".txt"
+    return path.parts[0] in {"packages", "docs", "systemd", "scripts", "includes", "tests"} and path.suffix in {
+        ".yaml", ".yml", ".md", ".service", ".timer", ".py", ".sh", ".txt", ".h", ".cpp", ".mjs"
     }
 
 

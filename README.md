@@ -4,6 +4,11 @@ Configurations des appareils, packages partagés et documentation, prêts à êt
 versionnés sur GitHub. Versions de référence : **ESPHome 2026.9.0** et
 **ESPHome Device Builder 1.14.9**, définies dans `requirements.txt`.
 
+**Convention de développement : [standard MQTT v1](docs/MQTT_STANDARD.md).**
+Les appareils MQTT utilisent `packages/mqtt.yaml` et les helpers C++ dans
+`includes/`. Ce document définit les topics, annonces, types, commandes,
+valeurs indisponibles et règles de conservation/rejeu à respecter.
+
 ## Interface web
 
 Depuis un appareil du réseau local, ouvrir **https://192.168.50.75:8443**.
@@ -41,7 +46,10 @@ esphome/
 ├── secrets.yaml.example       # Liste des secrets à renseigner
 ├── secrets.yaml               # Valeurs privées locales, ignorées par Git
 ├── packages/
-│   └── base.yaml              # Wi-Fi, API, OTA et journaux partagés
+│   ├── base.yaml              # Wi-Fi, API, OTA et journaux partagés
+│   └── mqtt.yaml              # Connexion, disponibilité, annonces et heartbeat
+├── includes/                 # Helpers MQTT et sélection des gestes
+├── tests/                    # Tests de la logique indépendante du matériel
 ├── docs/                      # Fiches appareils et câblage
 ├── scripts/github-backup.py   # Sauvegarde automatique GitHub
 ├── scripts/install-https.sh   # Installation utilisateur de Caddy
@@ -89,6 +97,10 @@ y compris ceux créés par l'assistant web : `.gitignore` ne masque pas les
 mots de passe écrits directement dans un fichier d'appareil.
 
 ## Vérifier, compiler et flasher
+
+Les particularités des appareils sont décrites dans
+[docs/espgesture.md](docs/espgesture.md) et
+[docs/espwaterlevel.md](docs/espwaterlevel.md).
 
 Sur cette machine, la commande `esphome` est disponible dans `~/.local/bin` :
 
