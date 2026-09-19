@@ -75,7 +75,7 @@ sensor:
     id: distance_eau_mm
     unit_of_measurement: "mm"
     accuracy_decimals: 0
-    update_interval: 5s
+    update_interval: 300s
     lambda: |-
       if (!id(distance_eau_m).has_state()) return NAN;
       return id(distance_eau_m).state * 1000.0f;
