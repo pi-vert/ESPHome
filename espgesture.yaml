@@ -45,6 +45,17 @@ wifi:
 
 captive_portal:
 
+mqtt:
+  # Ne pas transformer une fenêtre commencée hors connexion en événement neuf.
+  on_connect:
+    then:
+      - script.stop: resolve_gesture_window
+      - lambda: mqtt_standard::gesture_votes = mqtt_standard::GestureWindow{};
+  on_disconnect:
+    then:
+      - script.stop: resolve_gesture_window
+      - lambda: mqtt_standard::gesture_votes = mqtt_standard::GestureWindow{};
+
 status_led:
   pin: GPIO8
 
