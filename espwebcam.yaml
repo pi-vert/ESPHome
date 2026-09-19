@@ -1,0 +1,19 @@
+substitutions:
+  name: espwebcam
+  friendly_name: ESPWebCAM
+
+packages:
+  esphome.bluetooth-proxy: "github://esphome/bluetooth-proxies/esp32-generic/esp32-generic.yaml@main"
+
+esphome:
+  name: ${name}
+  name_add_mac_suffix: false
+  friendly_name: ${friendly_name}
+
+api:
+  encryption:
+    key: !secret espwebcam_api_encryption_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
