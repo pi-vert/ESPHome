@@ -4,14 +4,20 @@
 esphome:
   name: espmatrix
   friendly_name: ESPMatrix
+  on_boot:
+    priority: -10
+    then:
+      - light.turn_on:
+          id: matrix
+          effect: "RGB RAW"
+          brightness: 15%
 
 esp32:
-  variant: esp32s3
+  board: esp32-s3-devkitc-1
+  variant: esp32s3  
   framework:
-    type: esp-idf
-
-logger:
-
+    type: arduino
+    
 api:
   encryption:
     key: !secret espmatrix_api_encryption_key
@@ -27,3 +33,77 @@ wifi:
     password: !secret espmatrix_fallback_ap_password
 
 captive_portal:
+
+# Enable logging
+logger:
+
+globals:
+  - id: pixels
+    type: uint8_t[64][3]
+  - id: dirty
+    type: bool
+    initial_value: "false"
+
+mqtt:
+  broker: 192.168.50.227
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  topic_prefix: matrix
+
+  on_message:
+    - topic: matrix/frame
+      then:
+        - lambda: |-
+            int i = 0, val = 0, chan = 0;
+
+            for (char c : x) {
+              if (c >= '0' && c <= '9') {
+                val = val * 10 + (c - '0');
+              } else if (c == ',' || c == ';') {
+                id(pixels)[i][chan++] = val;
+                val = 0;
+                if (chan == 3) {
+                  chan = 0;
+                  i++;
+                  if (i >= 64) break;
+                }
+              }
+            }
+            id(dirty) = true;
+
+# -------------------------------------------------
+# MATRICE LED 8x8 WS2812
+# -------------------------------------------------
+
+light:
+  - platform: neopixelbus
+    id: matrix
+    pin: GPIO14
+    num_leds: 64
+    type: GRB
+    variant: WS2812
+    restore_mode: ALWAYS_ON
+    gamma_correct: 2.8
+
+    effects:
+      - addressable_lambda:
+          name: "RGB RAW"
+          update_interval: 100ms   # ⬅️ clé anti-scintillement
+          lambda: |-
+            if (!id(dirty)) return;
+
+            for (int y = 0; y < 8; y++) {
+              for (int x = 0; x < 8; x++) {
+
+                int src = y * 8 + x;
+                int dst = (7 - y) * 8 + (7 - x);  // rotation 180°
+
+                it[dst] = Color(
+                  id(pixels)[src][0],
+                  id(pixels)[src][1],
+                  id(pixels)[src][2]
+                );
+              }
+            }
+
+            id(dirty) = false;
