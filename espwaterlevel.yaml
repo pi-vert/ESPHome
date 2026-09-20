@@ -1,7 +1,7 @@
 substitutions:
   device_id: espwaterlevel_01
   device_type: water_level
-  firmware_version: "1.2.0"
+  firmware_version: "1.3.0"
   mqtt_discovery: "true"
   hauteur_vide_mm: "63.0"
   seuil_critique_mm: "5.0"
@@ -175,9 +175,10 @@ script:
           auto describe = [](JsonObject root) {
             mqtt_standard::announcement(root, "${device_id}", "${device_type}",
                                         "${firmware_version}", "${mqtt_prefix}");
-            mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "distance_eau_capteur", "float", "mm", true);
-            mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "niveau", "float", "mm", true);
-            mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "niveau_percent", "float", "%", true);
+            root["label"] = "Niveau d'eau";
+            mqtt_standard::range(mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "distance_eau_capteur", "float", "mm", true), 0, 2000, 1);
+            mqtt_standard::range(mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "niveau", "float", "mm", true), 0, ${hauteur_vide_mm}, 1);
+            mqtt_standard::range(mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "niveau_percent", "float", "%", true), 0, 100, 1);
             mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "esp_ip_address", "string", nullptr, true);
           };
           id(mqtt_client).publish_json("${mqtt_prefix}/announce", describe, 1, true);
