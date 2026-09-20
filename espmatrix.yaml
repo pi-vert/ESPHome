@@ -81,12 +81,12 @@ mqtt:
       then:
         - lambda: |-
             if (!x["pixels"].is<JsonArray>()) return;
-            const auto pixels = x["pixels"].as<JsonArray>();
-            if (pixels.size() != 192) return;
-            for (JsonVariant value : pixels) {
+            const auto frame_values = x["pixels"].as<JsonArray>();
+            if (frame_values.size() != 192) return;
+            for (JsonVariant value : frame_values) {
               if (!value.is<int>() || value.as<int>() < 0 || value.as<int>() > 255) return;
             }
-            for (size_t i = 0; i < 192; i++) id(pixels)[i / 3][i % 3] = pixels[i].as<uint8_t>();
+            for (size_t i = 0; i < 192; i++) id(pixels)[i / 3][i % 3] = frame_values[i].as<uint8_t>();
             id(dirty) = true;
 
 script:
