@@ -1,0 +1,62 @@
+# Copier à la racine en .yaml ; adapter carte, GPIO et étalonnage au montage.
+# ESP32 classique : curseur en GPIO34, extrémités du potentiomètre sur 3,3 V et GND.
+substitutions:
+  device_id: potentiometre_01
+  device_type: potentiometer
+  firmware_version: "1.0.0"
+packages:
+  mqtt_standard: !include packages/mqtt.yaml
+esphome:
+  name: potentiometre-01
+  friendly_name: Potentiomètre
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+logger:
+ota:
+  - platform: esphome
+sensor:
+  - platform: adc
+    pin: GPIO34
+    id: position
+    name: Position
+    attenuation: 12db
+    update_interval: 200ms
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    state_topic: ${mqtt_prefix}/sensor/position/state
+    qos: 0
+    retain: true
+    filters:
+      - calibrate_linear:
+          - 0.0 -> 0.0
+          - 3.1 -> 100.0
+      - clamp:
+          min_value: 0
+          max_value: 100
+      - delta: 0.5
+      - heartbeat: 5s
+script:
+  - id: mqtt_announce
+    then:
+      - lambda: |-
+          auto describe = [](JsonObject root) {
+            mqtt_standard::announcement(root, "${device_id}", "${device_type}", "${firmware_version}", "${mqtt_prefix}");
+            root["label"] = "Potentiomètre";
+            auto port = mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "position", "float", "%", true);
+            mqtt_standard::range(port, 0, 100, 0.1);
+            port["label"] = "Position"; port["ttl_s"] = 15;
+          };
+          id(mqtt_client).publish_json("${mqtt_prefix}/announce", describe, 1, true);
+          id(mqtt_client).publish_json("system/announce", describe, 1, false);
+  - id: mqtt_snapshot
+    then:
+      - lambda: |-
+          id(mqtt_client).publish_json("${mqtt_prefix}/state", [](JsonObject root) {
+            mqtt_standard::envelope(root, "${device_id}", "${device_type}", "${firmware_version}");
+            mqtt_standard::number(root, "position", id(position).state);
+          }, 0, true);

@@ -24,11 +24,12 @@ inline void announcement(JsonObject root, const char *id, const char *type,
   root["ip"] = ip;
   root["availability_topic"] = std::string(prefix) + "/status";
   root["state_topic"] = std::string(prefix) + "/state";
+  root["heartbeat_interval_s"] = 60;
   root["outputs"].to<JsonArray>();
   root["inputs"].to<JsonArray>();
 }
 
-inline void output(JsonObject root, const char *prefix, const char *category,
+inline JsonObject output(JsonObject root, const char *prefix, const char *category,
                    const char *name, const char *datatype, const char *unit, bool retain) {
   JsonObject item = root["outputs"].as<JsonArray>().add<JsonObject>();
   item["name"] = name;
@@ -38,6 +39,17 @@ inline void output(JsonObject root, const char *prefix, const char *category,
   item["topic"] = std::string(prefix) + "/" + category + "/" + name + "/state";
   item["qos"] = 0;
   item["retain"] = retain;
+  item["kind"] = std::strcmp(category, "event") == 0 ? "event" : "state";
+  item["ttl_s"] = 180;
+  return item;
+}
+
+// Bounds describe the value transmitted on MQTT, after ESPHome filters.
+inline JsonObject range(JsonObject port, float minimum, float maximum, float step) {
+  port["min"] = minimum;
+  port["max"] = maximum;
+  port["step"] = step;
+  return port;
 }
 
 inline JsonObject input(JsonObject root, const char *prefix, const char *name, const char *datatype) {
@@ -47,6 +59,7 @@ inline JsonObject input(JsonObject root, const char *prefix, const char *name, c
   item["topic"] = std::string(prefix) + "/actuator/" + name + "/set";
   item["qos"] = 0;
   item["retain"] = false;
+  item["multiple"] = "single";
   return item;
 }
 

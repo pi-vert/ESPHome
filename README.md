@@ -9,6 +9,13 @@ Les appareils MQTT utilisent `packages/mqtt.yaml` et les helpers C++ dans
 `includes/`. Ce document définit les topics, annonces, types, commandes,
 valeurs indisponibles et règles de conservation/rejeu à respecter.
 
+Les ports sont exploités par **[Patchwork](http://192.168.50.75:1880/patchwork/)** :
+entrées/sorties typées, plages, unités, liaisons et conversions. Les modèles
+`patchwork-potentiometer.yaml.example` et `patchwork-servo.yaml.example` montrent
+une liaison `0–100 % → 0–180°`. Voir la section 8 du standard MQTT pour les
+métadonnées et les écrans multi-sources. Les nouveaux firmwares répondent au
+bouton **Découvrir les nœuds** via `system/discover`.
+
 ## Interface web
 
 Depuis un appareil du réseau local, ouvrir **https://192.168.50.75:8443**.

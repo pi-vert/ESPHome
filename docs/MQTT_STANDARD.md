@@ -20,6 +20,7 @@ Appareils de référence : `espgesture`, `espwaterlevel_01` et `espwebcam_01`.
 | --- | --- | --- | --- | --- |
 | Annonce commune | `system/announce` | JSON d'un appareil | 1 | **false** |
 | Descriptif persistant | `device/<id>/announce` | Même JSON | 1 | true |
+| Demande de découverte | `system/discover` | `announce` | 1 | **false** |
 | Disponibilité | `device/<id>/status` | `online` / `offline` | 1 | true |
 | Battement de vie | `device/<id>/heartbeat` | `alive` | 0 | false |
 | Capteur | `device/<id>/sensor/<sortie>/state` | Nombre ou texte déclaré | 0 | true |
@@ -47,7 +48,8 @@ Wi-Fi : le broker n'est pas forcément connecté à cet instant.
 Répéter l'annonce à chaque reconnexion et toutes les 60 secondes. Cela permet
 au registre existant, abonné uniquement à `system/announce`, de se reconstituer.
 Un nouveau consommateur peut s'abonner à `device/+/announce` pour obtenir
-immédiatement les descriptifs mémorisés.
+immédiatement les descriptifs mémorisés. Le package écoute aussi `system/discover`
+(payload `announce`) et répond avec une annonce et un résumé.
 
 `system/announce` n'est jamais retained : un topic commun retained ne garderait
 que le dernier appareil. La copie persistante appartient au topic de l'appareil.
@@ -72,7 +74,12 @@ portant le nom de l'appareil :
       "datatype": "float",
       "unit": "%",
       "topic": "device/espwaterlevel_01/sensor/niveau_percent/state",
-      "qos": 0,
+    "min": 0,
+    "max": 100,
+    "step": 1,
+    "ttl_s": 180,
+    "kind": "state",
+    "qos": 0,
       "retain": true
     }
   ],
@@ -236,6 +243,15 @@ Les aliases ne doivent pas servir de modèle aux nouveaux appareils. Leur retrai
 nécessite une migration explicite des consommateurs. Aucun effacement automatique
 des anciens retained du broker n'est effectué lors d'une mise à jour de firmware.
 
+### ESPMatrix
+
+`espmatrix` expose l'entrée `frame` (JSON) sur
+`device/espmatrix/actuator/frame/set`. Le payload est un objet contenant `pixels`,
+une liste de **192 entiers de 0 à 255** : R, G, B pour les 64 pixels, dans l'ordre
+logique de la matrice. La rotation matérielle reste appliquée par le firmware.
+Le schéma est publié dans le descriptif. L'alias historique CSV `matrix/frame`
+reste accepté mais n'est pas annoncé comme un second port.
+
 ## 7. Créer un nouvel appareil conforme
 
 1. Choisir un `device_id` et des noms de sorties stables.
@@ -268,3 +284,122 @@ restent disponibles.
 Toute modification incompatible de format, unité, sens, ou politique de rejeu
 doit être documentée et versionnée. Préférer l'ajout de champs compatibles ou
 un alias temporaire annoncé dans les notes de migration.
+
+## 8. Métadonnées de ports et interconnexion Patchwork
+
+Cette extension est **compatible avec `schema_version: 1`** : les topics et les
+payloads existants ne changent pas. Les nouveaux appareils décrivent leurs ports
+assez précisément pour créer des liaisons sans connaître leur firmware.
+
+### Descriptif
+
+À la racine, `label` est le nom convivial et `heartbeat_interval_s` l'intervalle
+de présence (60 s par défaut). `id` reste l'identité stable du nœud. Tous les
+identifiants/noms de port ont au plus 64 caractères, en minuscules ASCII, chiffres,
+`_` ou `-`, avec une lettre ou un chiffre en premier ; préférer `_` dans ESPHome.
+
+Chaque port fournit `name`, `datatype`, `category`, `topic`, `qos`, `retain` et,
+selon ses besoins :
+
+| Champ | Sens |
+| --- | --- |
+| `label`, `description` | Nom convivial et signification de la donnée. |
+| `unit` | Unité de la valeur transmise, après filtres ESPHome. |
+| `min`, `max` | Bornes numériques croissantes ; à fournir dès qu'elles sont connues, notamment pour une consigne. |
+| `step` | Résolution/pas positif dans cette unité. |
+| `values` | Liste finie de valeurs autorisées (énumération). |
+| `kind` | `state` ou `event`. Un événement n'est jamais retained. |
+| `ttl_s` | Durée de validité d'une mesure depuis réception (180 s par défaut). |
+| `multiple` | Pour une entrée : `single` (défaut), `latest` ou `keyed`. |
+| `schema` | Pour du JSON : forme et contraintes des champs. |
+
+Une donnée numérique n'inclut jamais son unité dans le payload. Si les bornes
+réelles sont inconnues, les omettre : Patchwork demandera des bornes explicites
+pour une conversion de plage. `min/max` n'est pas le minimum/maximum observé depuis
+le démarrage ; c'est la plage du signal/consigne.
+
+Le helper `output` retourne maintenant le `JsonObject` du port, comme `input`.
+`range(port, min, max, step)` renseigne les bornes. Exemple potentiomètre :
+
+```cpp
+auto port = mqtt_standard::output(root, "${mqtt_prefix}", "sensor",
+                                 "position", "float", "%", true);
+mqtt_standard::range(port, 0, 100, 0.1);
+port["label"] = "Position";
+port["ttl_s"] = 15;
+```
+
+Exemple servo :
+
+```cpp
+auto port = mqtt_standard::input(root, "${mqtt_prefix}", "angle", "float");
+mqtt_standard::range(port, 0, 180, 1);
+port["unit"] = "°";
+port["multiple"] = "single";
+```
+
+Les modèles complets sont `patchwork-potentiometer.yaml.example` et
+`patchwork-servo.yaml.example`, à copier à la racine en `.yaml` et adapter à la
+carte/câblage. Le servo reçoit un nombre scalaire en degrés et vérifie également
+ses bornes dans le firmware. Sa sortie `angle` est la **consigne appliquée**, pas
+une mesure de position physique.
+
+### Cardinalité et conversion
+
+- Une sortie alimente plusieurs entrées : une conversion indépendante par liaison.
+- `single` : un seul émetteur actif pour cette entrée (servo, relais).
+- `latest` : plusieurs émetteurs ; la dernière valeur reçue est appliquée, sans
+  priorité implicite. À déclarer seulement si ce comportement est voulu.
+- `keyed` : entrée de type **json**, objet regroupé par clé de liaison. Adapté à
+  un écran recevant plusieurs sondes. Chaque entrée contient `value`, `unit`,
+  `source`, `port` et `received_at` (date UTC de réception par le routeur).
+
+```json
+{
+  "salon": {"value": 21.5, "unit": "°C", "source": "sonde_salon", "port": "temperature", "received_at": "2026-09-20T12:00:00.000Z"},
+  "jardin": {"value": 17, "unit": "°C", "source": "sonde_jardin", "port": "temperature", "received_at": "2026-09-20T12:00:01.000Z"}
+}
+```
+
+L'absence d'une clé signifie que sa source est invalide, hors ligne ou périmée.
+Le récepteur doit remplacer le regroupement précédent, pas fusionner les clés
+absentes indéfiniment. `{}` signifie qu'aucune mesure fraîche n'est disponible.
+
+Patchwork propose transmission directe, interpolation de plage (inversible),
+modèle texte, seuil vers booléen et extraction d'un champ JSON. L'entrée impose
+son pas et ses bornes. Le mode texte n'exécute aucun code. Les liaisons cycliques
+entre appareils sont refusées. Les liens en erreur restent visibles et peuvent
+être corrigés ; une nouvelle annonce remplace le descriptif de ports du nœud.
+
+### Découverte et fraîcheur
+
+Une annonce retained permet de reconstruire la carte, mais ne prouve pas que
+l'appareil est en ligne. Le routeur attend une annonce fraîche, un heartbeat,
+un statut `online` frais ou une mesure fraîche. Une absence de heartbeat durant
+trois intervalles rend le nœud non confirmé. `offline` le rend indisponible
+immédiatement. Aucune mesure retained ne déclenche d'action, même un événement.
+Les états mémorisés sont affichés séparément et aucun ordre n'est rejoué au
+redémarrage du routeur ou lors de la création d'une liaison.
+
+Avec MQTT 5, les consommateurs utilisent **Retain As Published = false** : une
+mesure publiée en retain par un capteur reste une nouvelle mesure pour un client
+déjà abonné. Le flag retained doit signaler uniquement une livraison depuis le
+stockage du broker. Les commandes `/set` restent toujours non retained.
+
+### Nœuds virtuels et adaptateurs
+
+Le contrat ne dépend ni d'ESP32 ni d'ESPHome. Un service Internet, un Raspberry Pi
+ou un adaptateur AWTRIX utilise la même annonce et la même disponibilité. Un
+adaptateur traduit les topics dédiés vers le protocole natif du composant.
+Les images HTTP et autres services non scalaires restent dans `services`.
+
+Patchwork fournit deux adaptateurs gérés dans Node-RED : AWTRIX (texte et écran
+multi-sources) et météo Open-Meteo (température, humidité, vent, code météo).
+Les services MQTT externes peuvent s'annoncer directement ou disposer d'un
+descriptif configuré dans l'interface ; ils publient eux-mêmes leur présence.
+Ne pas faire démarrer deux routeurs actifs avec les mêmes liaisons sur le même
+broker : chacun publierait ses commandes.
+
+Interface : `http://192.168.50.75:1880/patchwork/`. Le détail de l'exploitation,
+de la persistance et des conversions est dans le README de l'application
+`~/.node-red-clean/projects/ESP32/uibuilder/patchwork/README.md`.

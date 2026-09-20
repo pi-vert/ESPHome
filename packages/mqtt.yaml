@@ -43,6 +43,13 @@ mqtt:
     then:
       - script.execute: mqtt_announce
       - script.execute: mqtt_snapshot
+  on_message:
+    - topic: system/discover
+      qos: 1
+      payload: announce
+      then:
+        - script.execute: mqtt_announce
+        - script.execute: mqtt_snapshot
 
 interval:
   - interval: 60s

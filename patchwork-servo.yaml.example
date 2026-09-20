@@ -1,0 +1,77 @@
+# Copier à la racine en .yaml ; adapter GPIO, carte et limites au servo réel.
+# PWM en GPIO18. Alimentation du servo adaptée à son modèle, masse commune.
+substitutions:
+  device_id: servo_01
+  device_type: servo
+  firmware_version: "1.0.0"
+packages:
+  mqtt_standard: !include packages/mqtt.yaml
+esphome:
+  name: servo-01
+  friendly_name: Servo
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+logger:
+ota:
+  - platform: esphome
+output:
+  - platform: ledc
+    id: servo_pwm
+    pin: GPIO18
+    frequency: 50Hz
+servo:
+  - id: servo_motor
+    output: servo_pwm
+    min_level: 2.5%
+    idle_level: 7.5%
+    max_level: 12.5%
+    restore: false
+sensor:
+  - platform: template
+    name: Angle commandé
+    id: commanded_angle
+    unit_of_measurement: "°"
+    accuracy_decimals: 0
+    update_interval: never
+    state_topic: ${mqtt_prefix}/sensor/angle/state
+    qos: 0
+    retain: true
+mqtt:
+  on_message:
+    - topic: ${mqtt_prefix}/actuator/angle/set
+      qos: 0
+      then:
+        - lambda: |-
+            char *end = nullptr;
+            const float angle = strtof(x.c_str(), &end);
+            if (end == x.c_str() || *end != '\0' || !std::isfinite(angle) || angle < 0 || angle > 180) return;
+            id(servo_motor).write(angle / 90.0f - 1.0f);
+            id(commanded_angle).publish_state(angle);
+script:
+  - id: mqtt_announce
+    then:
+      - lambda: |-
+          auto describe = [](JsonObject root) {
+            mqtt_standard::announcement(root, "${device_id}", "${device_type}", "${firmware_version}", "${mqtt_prefix}");
+            root["label"] = "Servo";
+            auto input = mqtt_standard::input(root, "${mqtt_prefix}", "angle", "float");
+            mqtt_standard::range(input, 0, 180, 1);
+            input["unit"] = "°"; input["label"] = "Angle demandé";
+            auto output = mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "angle", "float", "°", true);
+            mqtt_standard::range(output, 0, 180, 1);
+            output["description"] = "Consigne appliquée, pas une mesure de position physique";
+          };
+          id(mqtt_client).publish_json("${mqtt_prefix}/announce", describe, 1, true);
+          id(mqtt_client).publish_json("system/announce", describe, 1, false);
+  - id: mqtt_snapshot
+    then:
+      - lambda: |-
+          id(mqtt_client).publish_json("${mqtt_prefix}/state", [](JsonObject root) {
+            mqtt_standard::envelope(root, "${device_id}", "${device_type}", "${firmware_version}");
+            mqtt_standard::number(root, "angle", id(commanded_angle).state);
+          }, 0, true);
