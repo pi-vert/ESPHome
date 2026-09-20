@@ -1,6 +1,14 @@
 # Board: Generic ESP32-S3 Board (Generic)
 # Definition: definitions/boards/generic-esp32s3/manifest.yaml
 
+substitutions:
+  device_id: espmatrix
+  device_type: led_matrix
+  firmware_version: "1.1.0"
+
+packages:
+  mqtt_standard: !include packages/mqtt.yaml
+
 esphome:
   name: espmatrix
   friendly_name: ESPMatrix
@@ -45,11 +53,7 @@ globals:
     initial_value: "false"
 
 mqtt:
-  broker: 192.168.50.227
-  username: !secret mqtt_username
-  password: !secret mqtt_password
-  topic_prefix: matrix
-
+  # Alias CSV historique. Le port annoncé utilise le JSON typé ci-dessous.
   on_message:
     - topic: matrix/frame
       then:
@@ -70,6 +74,49 @@ mqtt:
               }
             }
             id(dirty) = true;
+
+  on_json_message:
+    - topic: ${mqtt_prefix}/actuator/frame/set
+      qos: 0
+      then:
+        - lambda: |-
+            if (!x["pixels"].is<JsonArray>()) return;
+            const auto pixels = x["pixels"].as<JsonArray>();
+            if (pixels.size() != 192) return;
+            for (JsonVariant value : pixels) {
+              if (!value.is<int>() || value.as<int>() < 0 || value.as<int>() > 255) return;
+            }
+            for (size_t i = 0; i < 192; i++) id(pixels)[i / 3][i % 3] = pixels[i].as<uint8_t>();
+            id(dirty) = true;
+
+script:
+  - id: mqtt_announce
+    then:
+      - lambda: |-
+          auto describe = [](JsonObject root) {
+            mqtt_standard::announcement(root, "${device_id}", "${device_type}", "${firmware_version}", "${mqtt_prefix}");
+            root["label"] = "Matrice RGB 8×8";
+            auto input = mqtt_standard::input(root, "${mqtt_prefix}", "frame", "json");
+            input["label"] = "Image RGB";
+            input["description"] = "192 composantes R,G,B, de 0 à 255, dans pixels";
+            auto schema = input["schema"].to<JsonObject>();
+            schema["type"] = "object";
+            schema["required"].to<JsonArray>().add("pixels");
+            schema["additionalProperties"] = false;
+            auto pixels = schema["properties"]["pixels"].to<JsonObject>();
+            pixels["type"] = "array"; pixels["minItems"] = 192; pixels["maxItems"] = 192;
+            auto item = pixels["items"].to<JsonObject>();
+            item["type"] = "integer"; item["minimum"] = 0; item["maximum"] = 255;
+          };
+          id(mqtt_client).publish_json("${mqtt_prefix}/announce", describe, 1, true);
+          id(mqtt_client).publish_json("system/announce", describe, 1, false);
+  - id: mqtt_snapshot
+    then:
+      - lambda: |-
+          id(mqtt_client).publish_json("${mqtt_prefix}/state", [](JsonObject root) {
+            mqtt_standard::envelope(root, "${device_id}", "${device_type}", "${firmware_version}");
+            root["frame_pending"] = id(dirty);
+          }, 0, true);
 
 # -------------------------------------------------
 # MATRICE LED 8x8 WS2812
