@@ -2,7 +2,7 @@
 substitutions:
   device_id: espgesture
   device_type: gesture
-  firmware_version: "1.2.0"
+  firmware_version: "1.3.0"
   sensor_interval: 1s
   snapshot_interval: 5s
   debug_interval: 2s
@@ -193,9 +193,10 @@ script:
             mqtt_standard::announcement(root, "${device_id}", "${device_type}",
                                         "${firmware_version}", "${mqtt_prefix}");
             for (const char *name : {"clear", "proximity", "red", "green", "blue"}) {
-              mqtt_standard::output(root, "${mqtt_prefix}", "sensor", name, "float", "%", true);
+              mqtt_standard::range(mqtt_standard::output(root, "${mqtt_prefix}", "sensor", name, "float", "%", true), 0, 100, 0.1);
             }
-            mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "wifi", "int", "dBm", true);
+            root["label"] = "Gestes et lumière";
+            mqtt_standard::range(mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "wifi", "int", "dBm", true), -127, 0, 1);
             mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "last_gesture", "string", nullptr, true);
             for (const char *name : {"gesture_up", "gesture_down", "gesture_left", "gesture_right"}) {
               mqtt_standard::output(root, "${mqtt_prefix}", "binary_sensor", name, "bool", nullptr, false);
