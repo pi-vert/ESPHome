@@ -80,10 +80,10 @@ mqtt:
       qos: 0
       then:
         - lambda: |-
-            if (!x["pixels"].is<JsonArray>()) return;
-            const auto frame_values = x["pixels"].as<JsonArray>();
+            if (!x["pixels"].is<JsonArrayConst>()) return;
+            const auto frame_values = x["pixels"].as<JsonArrayConst>();
             if (frame_values.size() != 192) return;
-            for (JsonVariant value : frame_values) {
+            for (JsonVariantConst value : frame_values) {
               if (!value.is<int>() || value.as<int>() < 0 || value.as<int>() > 255) return;
             }
             for (size_t i = 0; i < 192; i++) id(pixels)[i / 3][i % 3] = frame_values[i].as<uint8_t>();
