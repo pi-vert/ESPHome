@@ -2,7 +2,7 @@
 substitutions:
   device_id: espwebcam_01
   device_type: camera
-  firmware_version: "1.1.0"
+  firmware_version: "1.2.0"
   camera_resolution: 640x480
   camera_jpeg_quality: "12"
   camera_max_fps: 0.5fps
@@ -208,13 +208,28 @@ script:
           auto describe = [](JsonObject root) {
             mqtt_standard::announcement(root, "${device_id}", "${device_type}",
                                         "${firmware_version}", "${mqtt_prefix}");
-            mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "wifi", "int", "dBm", true);
+            root["label"] = "Caméra ESP32";
+            mqtt_standard::range(mqtt_standard::output(root, "${mqtt_prefix}", "sensor", "wifi", "int", "dBm", true), -127, 0, 1);
             for (const char *name : {"status", "camera_ready"}) {
               mqtt_standard::output(root, "${mqtt_prefix}", "binary_sensor", name, "bool", nullptr, true);
             }
             for (const char *name : {"light", "led", "camera_config"}) {
               mqtt_standard::output(root, "${mqtt_prefix}", "actuator", name, "json", nullptr, true);
-              mqtt_standard::input(root, "${mqtt_prefix}", name, "json");
+              auto port = mqtt_standard::input(root, "${mqtt_prefix}", name, "json");
+              auto schema = port["schema"].to<JsonObject>();
+              schema["type"] = "object";
+              if (std::strcmp(name, "camera_config") == 0) {
+                schema["additionalProperties"] = false;
+                auto required = schema["required"].to<JsonArray>();
+                required.add("name"); required.add("value");
+                auto properties = schema["properties"].to<JsonObject>();
+                auto field = properties["name"].to<JsonObject>();
+                field["type"] = "string";
+                auto choices = field["enum"].to<JsonArray>();
+                choices.add("contrast"); choices.add("brightness"); choices.add("saturation");
+                auto value = properties["value"].to<JsonObject>();
+                value["type"] = "integer"; value["minimum"] = -2; value["maximum"] = 2;
+              }
             }
             mqtt_standard::output(root, "${mqtt_prefix}", "actuator", "restart", "bool", nullptr, false);
             auto restart = mqtt_standard::input(root, "${mqtt_prefix}", "restart", "string");
